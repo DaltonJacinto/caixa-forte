@@ -39,18 +39,15 @@
       return Math.round(ms / 86400000);
     };
 
-    const PERIODO_DIAS  = { diario: 1, semanal: 7, mensal: 30 };
-    const PERIODO_LABEL = { diario: "Diário", semanal: "Semanal", mensal: "Mensal" };
+    const calcJurosPeriodo = (saldo, taxaPct) => saldo * (taxaPct / 100);
 
-    const calcJurosPeriodo = (saldo, taxaPct, periodo) => saldo * (taxaPct / 100);
-
-    const gerarCiclos = (principal, taxaPct, numCiclos, dataInicio, periodo) => {
+    const gerarCiclos = (principal, taxaPct, numCiclos, dataPrimeiroPagamento) => {
       const ciclos = [];
-      const dias = PERIODO_DIAS[periodo] || 30;
+      const primeiroPagamento = new Date(dataPrimeiroPagamento + "T12:00:00");
       for (let i = 1; i <= numCiclos; i++) {
-        const venc = new Date(dataInicio + "T12:00:00");
-        venc.setDate(venc.getDate() + i * dias);
-        const juros = calcJurosPeriodo(principal, taxaPct, periodo);
+        const venc = new Date(primeiroPagamento);
+        venc.setMonth(venc.getMonth() + (i - 1));
+        const juros = calcJurosPeriodo(principal, taxaPct);
         ciclos.push({
           id: i,
           vencimento: venc.toISOString().split("T")[0],
@@ -136,7 +133,7 @@
       const [selecionadoId,setSelecionadoId]= useState(null);
       const [caixa,        setCaixa]        = useState(() => { try { return parseFloat(localStorage.getItem("cf_caixa")||"0"); } catch { return 0; } });
       const [fCliente,     setFCliente]     = useState({ nome:"", telefone:"", doc:"" });
-      const [fEmp,         setFEmp]         = useState({ clienteId:"", valor:"", taxa:"", numCiclos:"1", dataInicio:today(), periodo:"mensal", obs:"" });
+      const [fEmp,         setFEmp]         = useState({ clienteId:"", valor:"", taxa:"", numCiclos:"1", dataPagamento:today(), obs:"" });
       const [fAmort,       setFAmort]       = useState({ valor:"", data:today() });
       const [fCaixa,       setFCaixa]       = useState("");
       const [modalCaixa,   setModalCaixa]   = useState(false);
@@ -186,23 +183,22 @@
       const salvarEmprestimo = () => {
         if (!fEmp.clienteId || !fEmp.valor || !fEmp.taxa) return;
         const principal = parseFloat(fEmp.valor);
-        const ciclos = gerarCiclos(principal, parseFloat(fEmp.taxa), parseInt(fEmp.numCiclos)||1, fEmp.dataInicio, fEmp.periodo);
+        const ciclos = gerarCiclos(principal, parseFloat(fEmp.taxa), parseInt(fEmp.numCiclos)||1, fEmp.dataPagamento);
         setEmprestimos(e => [...e, {
           id: Date.now().toString(),
           clienteId: fEmp.clienteId,
           valorOriginal: principal,
           saldoActual: principal,
           taxa: parseFloat(fEmp.taxa),
-          periodo: fEmp.periodo,
           numCiclos: parseInt(fEmp.numCiclos)||1,
-          dataInicio: fEmp.dataInicio,
+          dataPagamento: fEmp.dataPagamento,
           obs: fEmp.obs,
           ciclos,
           amortizacoes: [],
           status: "ativo",
         }]);
         setCaixa(c => c - principal);
-        setFEmp({ clienteId:"", valor:"", taxa:"", numCiclos:"1", dataInicio:today(), periodo:"mensal", obs:"" });
+        setFEmp({ clienteId:"", valor:"", taxa:"", numCiclos:"1", dataPagamento:today(), obs:"" });
         setModal(null);
       };
 
@@ -222,11 +218,10 @@
           let novoSaldo = emp.saldoActual;
 
           if (tipo === "juros") {
-            const diasPeriodo = PERIODO_DIAS[emp.periodo||"mensal"] || 30;
             const novaVenc = new Date(cicloAlvo.vencimento + "T12:00:00");
-            novaVenc.setDate(novaVenc.getDate() + diasPeriodo);
+            novaVenc.setMonth(novaVenc.getMonth() + 1);
             const novoId = Math.max(...novosCiclos.map(c=>c.id)) + 1;
-            const novosJuros = calcJurosPeriodo(emp.saldoActual, emp.taxa, emp.periodo||"mensal");
+            const novosJuros = calcJurosPeriodo(emp.saldoActual, emp.taxa);
             novosCiclos = [...novosCiclos, {
               id: novoId,
               vencimento: novaVenc.toISOString().split("T")[0],
@@ -259,7 +254,7 @@
           const amortReg  = { id: Date.now().toString(), valor: valorAmort, data: fAmort.data, saldoAntes: emp.saldoActual, saldoDepois: novoSaldo };
           const novosCiclos = emp.ciclos.map(c => {
             if (c.status !== "pendente") return c;
-            const novosJuros = calcJurosPeriodo(novoSaldo, emp.taxa, emp.periodo||"mensal");
+            const novosJuros = calcJurosPeriodo(novoSaldo, emp.taxa);
             return { ...c, saldo: novoSaldo, juros: novosJuros, total: novoSaldo + novosJuros };
           });
           const status = novoSaldo === 0 ? "quitado" : "ativo";
@@ -282,7 +277,6 @@
         const pend   = (emp.ciclos||[]).filter(p=>p.status==="pendente");
         const prox   = pend[0];
         const atr    = pend.filter(p => diasEntre(p.vencimento, today()) > 0);
-        const periodo= emp.periodo || "mensal";
         return (
           <div style={cardS({ cursor:"pointer", borderColor: atr.length ? C.red+"66" : C.border })}
             onClick={() => { setSelecionadoId(emp.id); setModal("detalhes"); }}>
@@ -290,7 +284,7 @@
               <div>
                 <div style={{ fontWeight:700, fontSize:15, marginBottom:3 }}>{cli?.nome || "?"}</div>
                 <div style={{ color:C.muted, fontSize:11 }}>
-                  {fmtDate(emp.dataInicio)} · {emp.taxa}%/{(PERIODO_LABEL[periodo]||"Mensal").toLowerCase()}
+                  1o pagamento: {fmtDate(emp.dataPagamento || emp.dataInicio)} · {emp.taxa}%/mensal
                 </div>
               </div>
               <div style={{ textAlign:"right" }}>
@@ -310,7 +304,10 @@
             )}
             {(emp.amortizacoes||[]).length > 0 && (
               <div style={{ marginTop:6, fontSize:11, color:C.blue }}>
-                💧 {emp.amortizacoes.length} amortização(ões) · saldo {fmt(emp.saldoActual)}
+                {(() => {
+                  const ultimaAmortizacao = emp.amortizacoes[emp.amortizacoes.length - 1];
+                  return `💧 ${emp.amortizacoes.length} amortização(ões) · Última: ${fmt(ultimaAmortizacao.valor)} em ${fmtDate(ultimaAmortizacao.data)}`;
+                })()}
               </div>
             )}
           </div>
@@ -328,7 +325,7 @@
               <div>
                 <div style={{ color:C.gold, fontWeight:700, fontSize:18 }}>{cli?.nome}</div>
                 <div style={{ color:C.muted, fontSize:11, marginTop:2 }}>
-                  Original: {fmt(emp.valorOriginal||emp.saldoActual)} · {emp.taxa}%/{(PERIODO_LABEL[emp.periodo||"mensal"]||"Mensal").toLowerCase()}
+                  Original: {fmt(emp.valorOriginal||emp.saldoActual)} · {emp.taxa}%/mensal
                 </div>
                 <div style={{ color:C.goldL, fontSize:13, fontWeight:700, marginTop:4 }}>Saldo actual: {fmt(emp.saldoActual)}</div>
                 {emp.obs && <div style={{ color:C.muted, fontSize:11, marginTop:2 }}>📝 {emp.obs}</div>}
@@ -348,9 +345,13 @@
                 <div style={{ color:C.blue, fontSize:10, letterSpacing:2, marginBottom:8 }}>AMORTIZAÇÕES</div>
                 {emp.amortizacoes.map((a,i) => (
                   <div key={i} style={cardS({ background:C.card2, padding:"10px 14px", borderColor:C.blue+"33" })}>
+                    <div style={{ display:"flex", justifyContent:"space-between", fontSize:12, marginBottom:4 }}>
+                      <span style={{ color:C.muted }}>Data da amortização</span>
+                      <span style={{ color:C.text, fontWeight:700 }}>{fmtDate(a.data)}</span>
+                    </div>
                     <div style={{ display:"flex", justifyContent:"space-between", fontSize:13 }}>
-                      <span style={{ color:C.blue, fontWeight:700 }}>- {fmt(a.valor)}</span>
-                      <span style={{ color:C.muted, fontSize:11 }}>{fmtDate(a.data)}</span>
+                      <span style={{ color:C.muted }}>Valor amortizado</span>
+                      <span style={{ color:C.blue, fontWeight:700 }}>{fmt(a.valor)}</span>
                     </div>
                     <div style={{ color:C.muted, fontSize:11, marginTop:2 }}>{fmt(a.saldoAntes)} → {fmt(a.saldoDepois)}</div>
                   </div>
@@ -399,10 +400,9 @@
       const AmortizacaoModal = () => {
         const emp = emprestimos.find(e => e.id === selecionadoId);
         if (!emp) return null;
-        const periodo   = emp.periodo || "mensal";
         const valAmort  = parseFloat(fAmort.valor) || 0;
         const novoSaldo = Math.max(0, emp.saldoActual - valAmort);
-        const novosJuros= calcJurosPeriodo(novoSaldo, emp.taxa, periodo);
+        const novosJuros= calcJurosPeriodo(novoSaldo, emp.taxa);
         return (
           <div style={{ background:C.card, borderRadius:"20px 20px 0 0", padding:24, width:"100%", borderTop:`2px solid ${C.blue}` }}>
             <div style={{ color:C.blue, fontWeight:700, fontSize:16, marginBottom:6, letterSpacing:2 }}>💧 AMORTIZAR DÍVIDA</div>
@@ -599,37 +599,26 @@
                     {clientes.map(c=><option key={c.id} value={c.id}>{c.nome}</option>)}
                   </select>
                 </div>
-                <div style={{ marginBottom:14 }}>
-                  <label style={lbl}>PERÍODO DO EMPRÉSTIMO</label>
-                  <div style={{ display:"flex", gap:8 }}>
-                    {["diario","semanal","mensal"].map(p => (
-                      <button key={p} onClick={()=>setFEmp(v=>({...v,periodo:p}))}
-                        style={{ flex:1, padding:"10px 0", borderRadius:8, border:`1px solid ${fEmp.periodo===p ? C.gold : C.border}`, background: fEmp.periodo===p ? C.gold+"22" : "transparent", color: fEmp.periodo===p ? C.gold : C.muted, fontFamily:"'Courier New',monospace", fontSize:11, fontWeight:700, cursor:"pointer", letterSpacing:1 }}>
-                        {(PERIODO_LABEL[p]||p).toUpperCase()}
-                      </button>
-                    ))}
-                  </div>
-                </div>
                 <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:14 }}>
                   <div><label style={lbl}>VALOR (MZN) *</label><input style={inp} type="number" placeholder="0.00" value={fEmp.valor} onChange={e=>setFEmp(v=>({...v,valor:e.target.value}))} /></div>
                   <div>
-                    <label style={lbl}>TAXA {(PERIODO_LABEL[fEmp.periodo||"mensal"]||"MENSAL").toUpperCase()} (%)*</label>
+                    <label style={lbl}>TAXA MENSAL (%)*</label>
                     <input style={inp} type="number" placeholder="10" value={fEmp.taxa} onChange={e=>setFEmp(v=>({...v,taxa:e.target.value}))} />
                   </div>
                 </div>
                 <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:14 }}>
                   <div><label style={lbl}>Nº CICLOS</label><input style={inp} type="number" min="1" value={fEmp.numCiclos} onChange={e=>setFEmp(v=>({...v,numCiclos:e.target.value}))} /></div>
-                  <div><label style={lbl}>DATA INÍCIO</label><input style={inp} type="date" value={fEmp.dataInicio} onChange={e=>setFEmp(v=>({...v,dataInicio:e.target.value}))} /></div>
+                  <div><label style={lbl}>DATA DO PAGAMENTO</label><input style={inp} type="date" value={fEmp.dataPagamento} onChange={e=>setFEmp(v=>({...v,dataPagamento:e.target.value}))} /></div>
                 </div>
                 {fEmp.valor && fEmp.taxa && fEmp.numCiclos && (() => {
                   const principal = parseFloat(fEmp.valor)||0;
-                  const juros     = calcJurosPeriodo(principal, parseFloat(fEmp.taxa)||0, fEmp.periodo);
+                  const juros     = calcJurosPeriodo(principal, parseFloat(fEmp.taxa)||0);
                   const total     = (principal + juros) * (parseInt(fEmp.numCiclos)||1);
                   return (
                     <div style={cardS({ background:C.card2, borderColor:C.gold+"33", marginBottom:14 })}>
                       <div style={{ color:C.muted, fontSize:10, letterSpacing:2, marginBottom:8 }}>SIMULAÇÃO</div>
                       <div style={{ display:"flex", gap:12, fontSize:13, flexWrap:"wrap" }}>
-                        <div><div style={{ color:C.muted, fontSize:9 }}>JUROS/{(PERIODO_LABEL[fEmp.periodo||"mensal"]||"MENSAL").toUpperCase()}</div><div style={{ color:C.red, fontWeight:700 }}>{fmt(juros)}</div></div>
+                        <div><div style={{ color:C.muted, fontSize:9 }}>JUROS/MENSAL</div><div style={{ color:C.red, fontWeight:700 }}>{fmt(juros)}</div></div>
                         <div><div style={{ color:C.muted, fontSize:9 }}>JUROS TOTAIS</div><div style={{ color:C.red, fontWeight:700 }}>{fmt(juros*(parseInt(fEmp.numCiclos)||1))}</div></div>
                         <div><div style={{ color:C.muted, fontSize:9 }}>TOTAL GERAL</div><div style={{ color:C.green, fontWeight:700 }}>{fmt(total)}</div></div>
                       </div>
