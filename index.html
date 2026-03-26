@@ -1,0 +1,713 @@
+<!DOCTYPE html>
+<html lang="pt">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="theme-color" content="#07070e" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Caixa Forte" />
+  <title>💰 Caixa Forte</title>
+  <link rel="manifest" href="manifest.json" />
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #07070e; overflow-x: hidden; }
+    #root { min-height: 100vh; }
+  </style>
+</head>
+<body>
+  <div id="root"></div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+
+  <script type="text/babel">
+    const { useState, useEffect } = React;
+
+    // ─── FORMATAÇÃO ──────────────────────────────────────────────────────────────
+    const fmt = (v) =>
+      new Intl.NumberFormat("pt-MZ", { style: "currency", currency: "MZN" }).format(v || 0);
+
+    const fmtDate = (d) =>
+      d ? new Date(d + "T12:00:00").toLocaleDateString("pt-PT") : "-";
+
+    const today = () => new Date().toISOString().split("T")[0];
+
+    const diasEntre = (a, b) => {
+      const ms = new Date(b + "T12:00:00") - new Date(a + "T12:00:00");
+      return Math.round(ms / 86400000);
+    };
+
+    const PERIODO_DIAS  = { diario: 1, semanal: 7, mensal: 30 };
+    const PERIODO_LABEL = { diario: "Diário", semanal: "Semanal", mensal: "Mensal" };
+
+    const calcJurosPeriodo = (saldo, taxaPct, periodo) => saldo * (taxaPct / 100);
+
+    const gerarCiclos = (principal, taxaPct, numCiclos, dataInicio, periodo) => {
+      const ciclos = [];
+      const dias = PERIODO_DIAS[periodo] || 30;
+      for (let i = 1; i <= numCiclos; i++) {
+        const venc = new Date(dataInicio + "T12:00:00");
+        venc.setDate(venc.getDate() + i * dias);
+        const juros = calcJurosPeriodo(principal, taxaPct, periodo);
+        ciclos.push({
+          id: i,
+          vencimento: venc.toISOString().split("T")[0],
+          saldo: principal,
+          juros,
+          total: principal + juros,
+          status: "pendente",
+          dataPagamento: null,
+          valorPago: 0,
+        });
+      }
+      return ciclos;
+    };
+
+    // ─── PIN SCREEN ───────────────────────────────────────────────────────────────
+    function PinScreen({ onUnlock, pinSalvo, onSetPin }) {
+      const [digits, setDigits] = useState("");
+      const [mode]   = useState(pinSalvo ? "login" : "setup");
+      const [confirm, setConfirm] = useState("");
+      const [step, setStep]       = useState(1);
+      const [erro, setErro]       = useState("");
+      const [shake, setShake]     = useState(false);
+
+      const triggerShake = () => { setShake(true); setTimeout(() => setShake(false), 600); };
+
+      const handle = (val) => {
+        if (mode === "login") {
+          if (val === pinSalvo) onUnlock();
+          else { setErro("PIN incorrecto"); triggerShake(); setDigits(""); }
+        } else {
+          if (step === 1) { setConfirm(val); setStep(2); setDigits(""); setErro(""); }
+          else {
+            if (val === confirm) onSetPin(val);
+            else { setErro("PINs não coincidem"); triggerShake(); setStep(1); setConfirm(""); setDigits(""); }
+          }
+        }
+      };
+
+      const press = (d) => {
+        if (digits.length >= 4) return;
+        const novo = digits + d;
+        setDigits(novo);
+        setErro("");
+        if (novo.length === 4) setTimeout(() => handle(novo), 150);
+      };
+
+      return (
+        <div style={{ minHeight:"100vh", display:"flex", flexDirection:"column", alignItems:"center", justifyContent:"center", background:"#07070e", fontFamily:"'Courier New',monospace" }}>
+          <div style={{ marginBottom:32, textAlign:"center" }}>
+            <div style={{ fontSize:52, marginBottom:8 }}>💰</div>
+            <div style={{ color:"#c9a84c", fontSize:26, fontWeight:700, letterSpacing:5 }}>CAIXA FORTE</div>
+            <div style={{ color:"#444", fontSize:10, marginTop:6, letterSpacing:3 }}>
+              {mode==="login" ? "ACESSO RESTRITO" : step===1 ? "DEFINIR PIN" : "CONFIRMAR PIN"}
+            </div>
+          </div>
+          <div style={{ display:"flex", gap:18, marginBottom:28, animation: shake ? "shake 0.5s" : "none" }}>
+            {[0,1,2,3].map(i => (
+              <div key={i} style={{ width:22, height:22, borderRadius:"50%", background: i < digits.length ? "#c9a84c" : "transparent", border:"2px solid #c9a84c", transition:"background 0.15s" }} />
+            ))}
+          </div>
+          {erro && <div style={{ color:"#e05c5c", fontSize:13, marginBottom:14 }}>{erro}</div>}
+          <div style={{ display:"grid", gridTemplateColumns:"repeat(3,1fr)", gap:14 }}>
+            {[1,2,3,4,5,6,7,8,9,"",0,"⌫"].map((d, i) => (
+              <button key={i} onClick={() => d==="⌫" ? setDigits(x=>x.slice(0,-1)) : d!=="" ? press(String(d)) : null}
+                style={{ width:72, height:72, borderRadius:14, background: d==="" ? "transparent" : "#10101a", border: d==="" ? "none" : "1px solid #222233", color:"#c9a84c", fontSize:26, cursor: d==="" ? "default" : "pointer", fontFamily:"'Courier New',monospace", fontWeight:700 }}>
+                {d}
+              </button>
+            ))}
+          </div>
+          <style>{`@keyframes shake{0%,100%{transform:translateX(0)}20%{transform:translateX(-10px)}40%{transform:translateX(10px)}60%{transform:translateX(-10px)}80%{transform:translateX(10px)}}`}</style>
+        </div>
+      );
+    }
+
+    // ─── APP PRINCIPAL ─────────────────────────────────────────────────────────────
+    function App() {
+      const [pin,          setPin]          = useState(() => localStorage.getItem("cf_pin") || "");
+      const [unlocked,     setUnlocked]     = useState(false);
+      const [clientes,     setClientes]     = useState(() => { try { return JSON.parse(localStorage.getItem("cf_clientes")||"[]"); } catch { return []; } });
+      const [emprestimos,  setEmprestimos]  = useState(() => { try { return JSON.parse(localStorage.getItem("cf_emprestimos")||"[]"); } catch { return []; } });
+      const [aba,          setAba]          = useState("dashboard");
+      const [modal,        setModal]        = useState(null);
+      const [selecionadoId,setSelecionadoId]= useState(null);
+      const [caixa,        setCaixa]        = useState(() => { try { return parseFloat(localStorage.getItem("cf_caixa")||"0"); } catch { return 0; } });
+      const [fCliente,     setFCliente]     = useState({ nome:"", telefone:"", doc:"" });
+      const [fEmp,         setFEmp]         = useState({ clienteId:"", valor:"", taxa:"", numCiclos:"1", dataInicio:today(), periodo:"mensal", obs:"" });
+      const [fAmort,       setFAmort]       = useState({ valor:"", data:today() });
+      const [fCaixa,       setFCaixa]       = useState("");
+      const [modalCaixa,   setModalCaixa]   = useState(false);
+
+      useEffect(() => { localStorage.setItem("cf_clientes",    JSON.stringify(clientes)); },    [clientes]);
+      useEffect(() => { localStorage.setItem("cf_emprestimos", JSON.stringify(emprestimos)); }, [emprestimos]);
+      useEffect(() => { localStorage.setItem("cf_caixa",       String(caixa)); },               [caixa]);
+
+      const handleSetPin = (p) => { localStorage.setItem("cf_pin", p); setPin(p); setUnlocked(true); };
+      if (!unlocked) return <PinScreen onUnlock={() => setUnlocked(true)} pinSalvo={pin} onSetPin={handleSetPin} />;
+
+      const C = { bg:"#07070e", card:"#0d0d18", card2:"#0a0a14", border:"#1a1a2e", gold:"#c9a84c", goldL:"#e8c96a", red:"#e05c5c", green:"#4caf7d", blue:"#5c8de0", text:"#e8e0d0", muted:"#555570" };
+      const inp  = { background:C.card2, border:`1px solid ${C.border}`, borderRadius:8, padding:"11px 14px", color:C.text, fontFamily:"'Courier New',monospace", fontSize:14, width:"100%", boxSizing:"border-box", outline:"none" };
+      const lbl  = { color:C.muted, fontSize:10, letterSpacing:2, marginBottom:5, display:"block" };
+      const btn  = (bg=C.gold) => ({ background:bg, color: bg===C.gold||bg==="#c9a84c" ? "#07070e" : "#fff", border:"none", borderRadius:8, padding:"11px 18px", fontFamily:"'Courier New',monospace", fontWeight:700, fontSize:13, cursor:"pointer", letterSpacing:1 });
+      const btnO = { background:"transparent", border:`1px solid ${C.border}`, color:C.muted, borderRadius:8, padding:"10px 16px", fontFamily:"'Courier New',monospace", fontSize:12, cursor:"pointer" };
+      const cardS= (extra={}) => ({ background:C.card, border:`1px solid ${C.border}`, borderRadius:12, padding:16, marginBottom:12, ...extra });
+      const tag  = (c) => ({ background:c+"22", color:c, borderRadius:6, padding:"3px 9px", fontSize:11, fontWeight:700, letterSpacing:1 });
+
+      // ─── Alertas ─────────────────────────────────────────────────────────────────
+      const alertas = emprestimos.flatMap(emp => {
+        const cli = clientes.find(c => c.id === emp.clienteId);
+        return (emp.ciclos||[]).filter(p => p.status==="pendente").flatMap(p => {
+          const diasAteVenc = diasEntre(today(), p.vencimento);
+          const atraso      = diasEntre(p.vencimento, today());
+          if (diasAteVenc <= 3 || atraso > 0) return [{ emp, cli, p, diasAteVenc, atraso }];
+          return [];
+        });
+      });
+
+      // ─── Estatísticas ─────────────────────────────────────────────────────────────
+      const totalEmprestado = emprestimos.reduce((s,e) => s + (e.saldoActual||0), 0);
+      const totalReceber    = emprestimos.filter(e=>e.status==="ativo").flatMap(e=>(e.ciclos||[]).filter(p=>p.status==="pendente")).reduce((s,p)=>s+p.total,0);
+      const totalRecebido   = emprestimos.flatMap(e=>(e.ciclos||[]).filter(p=>p.status!=="pendente")).reduce((s,p)=>s+p.valorPago,0)
+                            + emprestimos.reduce((s,e)=>(e.amortizacoes||[]).reduce((a,x)=>a+x.valor,s),0);
+      const empsAtivos      = emprestimos.filter(e=>e.status==="ativo").length;
+
+      // ─── Guardar cliente ──────────────────────────────────────────────────────────
+      const salvarCliente = () => {
+        if (!fCliente.nome.trim()) return;
+        setClientes(c => [...c, { id:Date.now().toString(), ...fCliente }]);
+        setFCliente({ nome:"", telefone:"", doc:"" });
+        setModal(null);
+      };
+
+      // ─── Guardar empréstimo ───────────────────────────────────────────────────────
+      const salvarEmprestimo = () => {
+        if (!fEmp.clienteId || !fEmp.valor || !fEmp.taxa) return;
+        const principal = parseFloat(fEmp.valor);
+        const ciclos = gerarCiclos(principal, parseFloat(fEmp.taxa), parseInt(fEmp.numCiclos)||1, fEmp.dataInicio, fEmp.periodo);
+        setEmprestimos(e => [...e, {
+          id: Date.now().toString(),
+          clienteId: fEmp.clienteId,
+          valorOriginal: principal,
+          saldoActual: principal,
+          taxa: parseFloat(fEmp.taxa),
+          periodo: fEmp.periodo,
+          numCiclos: parseInt(fEmp.numCiclos)||1,
+          dataInicio: fEmp.dataInicio,
+          obs: fEmp.obs,
+          ciclos,
+          amortizacoes: [],
+          status: "ativo",
+        }]);
+        setCaixa(c => c - principal);
+        setFEmp({ clienteId:"", valor:"", taxa:"", numCiclos:"1", dataInicio:today(), periodo:"mensal", obs:"" });
+        setModal(null);
+      };
+
+      // ─── Pagar ciclo ──────────────────────────────────────────────────────────────
+      const pagarCiclo = (empId, cicloId, tipo) => {
+        setEmprestimos(emps => emps.map(emp => {
+          if (emp.id !== empId) return emp;
+          const cicloIdx = emp.ciclos.findIndex(c => c.id === cicloId);
+          const cicloAlvo = emp.ciclos[cicloIdx];
+          if (!cicloAlvo) return emp;
+
+          let novosCiclos = emp.ciclos.map((c,i) => {
+            if (i !== cicloIdx) return c;
+            return { ...c, status: tipo, dataPagamento: today(), valorPago: tipo==="pago" ? c.total : c.juros };
+          });
+
+          let novoSaldo = emp.saldoActual;
+
+          if (tipo === "juros") {
+            const diasPeriodo = PERIODO_DIAS[emp.periodo||"mensal"] || 30;
+            const novaVenc = new Date(cicloAlvo.vencimento + "T12:00:00");
+            novaVenc.setDate(novaVenc.getDate() + diasPeriodo);
+            const novoId = Math.max(...novosCiclos.map(c=>c.id)) + 1;
+            const novosJuros = calcJurosPeriodo(emp.saldoActual, emp.taxa, emp.periodo||"mensal");
+            novosCiclos = [...novosCiclos, {
+              id: novoId,
+              vencimento: novaVenc.toISOString().split("T")[0],
+              saldo: emp.saldoActual,
+              juros: novosJuros,
+              total: emp.saldoActual + novosJuros,
+              status: "pendente",
+              dataPagamento: null,
+              valorPago: 0,
+            }];
+          }
+
+          if (tipo === "pago") novoSaldo = 0;
+
+          const pendentes  = novosCiclos.filter(c => c.status === "pendente");
+          const novoStatus = (novoSaldo === 0 && pendentes.length === 0) ? "quitado" : "ativo";
+          const valorRecebido = tipo === "pago" ? cicloAlvo.total : cicloAlvo.juros;
+          setCaixa(c => c + valorRecebido);
+          return { ...emp, ciclos: novosCiclos, saldoActual: novoSaldo, status: novoStatus };
+        }));
+      };
+
+      // ─── Amortização ──────────────────────────────────────────────────────────────
+      const fazerAmortizacao = (empId) => {
+        const valorAmort = parseFloat(fAmort.valor);
+        if (!valorAmort || valorAmort <= 0) return;
+        setEmprestimos(emps => emps.map(emp => {
+          if (emp.id !== empId) return emp;
+          const novoSaldo = Math.max(0, emp.saldoActual - valorAmort);
+          const amortReg  = { id: Date.now().toString(), valor: valorAmort, data: fAmort.data, saldoAntes: emp.saldoActual, saldoDepois: novoSaldo };
+          const novosCiclos = emp.ciclos.map(c => {
+            if (c.status !== "pendente") return c;
+            const novosJuros = calcJurosPeriodo(novoSaldo, emp.taxa, emp.periodo||"mensal");
+            return { ...c, saldo: novoSaldo, juros: novosJuros, total: novoSaldo + novosJuros };
+          });
+          const status = novoSaldo === 0 ? "quitado" : "ativo";
+          return { ...emp, saldoActual: novoSaldo, ciclos: novosCiclos, amortizacoes: [...(emp.amortizacoes||[]), amortReg], status };
+        }));
+        setCaixa(c => c + valorAmort);
+        setFAmort({ valor:"", data:today() });
+        setModal("detalhes");
+      };
+
+      // ─── WhatsApp ─────────────────────────────────────────────────────────────────
+      const whatsApp = (tel, nome, venc, valor) => {
+        const msg = encodeURIComponent(`Olá *${nome}*! 👋\n\nLembrete de pagamento:\n💰 Valor: *${fmt(valor)}*\n📅 Vencimento: *${fmtDate(venc)}*\n\nPor favor entre em contacto para confirmar. Obrigado!`);
+        window.open(`https://wa.me/258${tel.replace(/\D/g,"")}?text=${msg}`, "_blank");
+      };
+
+      // ─── EmpCard ──────────────────────────────────────────────────────────────────
+      const EmpCard = ({ emp }) => {
+        const cli    = clientes.find(c => c.id === emp.clienteId);
+        const pend   = (emp.ciclos||[]).filter(p=>p.status==="pendente");
+        const prox   = pend[0];
+        const atr    = pend.filter(p => diasEntre(p.vencimento, today()) > 0);
+        const periodo= emp.periodo || "mensal";
+        return (
+          <div style={cardS({ cursor:"pointer", borderColor: atr.length ? C.red+"66" : C.border })}
+            onClick={() => { setSelecionadoId(emp.id); setModal("detalhes"); }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start" }}>
+              <div>
+                <div style={{ fontWeight:700, fontSize:15, marginBottom:3 }}>{cli?.nome || "?"}</div>
+                <div style={{ color:C.muted, fontSize:11 }}>
+                  {fmtDate(emp.dataInicio)} · {emp.taxa}%/{(PERIODO_LABEL[periodo]||"Mensal").toLowerCase()}
+                </div>
+              </div>
+              <div style={{ textAlign:"right" }}>
+                <div style={{ color:C.gold, fontWeight:700, fontSize:16 }}>{fmt(emp.saldoActual)}</div>
+                <span style={tag(emp.status==="quitado" ? C.green : atr.length ? C.red : C.gold)}>
+                  {emp.status==="quitado" ? "QUITADO" : atr.length ? `${atr.length}x ATRASO` : "ATIVO"}
+                </span>
+              </div>
+            </div>
+            {prox && emp.status==="ativo" && (
+              <div style={{ marginTop:10, paddingTop:10, borderTop:`1px solid ${C.border}`, display:"flex", justifyContent:"space-between", fontSize:12 }}>
+                <span style={{ color:C.muted }}>Próximo pagamento</span>
+                <span style={{ color: diasEntre(prox.vencimento, today())>0 ? C.red : C.goldL, fontWeight:600 }}>
+                  {fmtDate(prox.vencimento)} · {fmt(prox.total)}
+                </span>
+              </div>
+            )}
+            {(emp.amortizacoes||[]).length > 0 && (
+              <div style={{ marginTop:6, fontSize:11, color:C.blue }}>
+                💧 {emp.amortizacoes.length} amortização(ões) · saldo {fmt(emp.saldoActual)}
+              </div>
+            )}
+          </div>
+        );
+      };
+
+      // ─── Modal Detalhes ───────────────────────────────────────────────────────────
+      const DetalhesModal = () => {
+        const emp = emprestimos.find(e => e.id === selecionadoId);
+        if (!emp) return null;
+        const cli = clientes.find(c => c.id === emp.clienteId);
+        return (
+          <div style={{ background:C.card, borderRadius:"20px 20px 0 0", padding:22, width:"100%", maxHeight:"88vh", overflowY:"auto", borderTop:`2px solid ${C.gold}` }}>
+            <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", marginBottom:16 }}>
+              <div>
+                <div style={{ color:C.gold, fontWeight:700, fontSize:18 }}>{cli?.nome}</div>
+                <div style={{ color:C.muted, fontSize:11, marginTop:2 }}>
+                  Original: {fmt(emp.valorOriginal||emp.saldoActual)} · {emp.taxa}%/{(PERIODO_LABEL[emp.periodo||"mensal"]||"Mensal").toLowerCase()}
+                </div>
+                <div style={{ color:C.goldL, fontSize:13, fontWeight:700, marginTop:4 }}>Saldo actual: {fmt(emp.saldoActual)}</div>
+                {emp.obs && <div style={{ color:C.muted, fontSize:11, marginTop:2 }}>📝 {emp.obs}</div>}
+              </div>
+              <button style={btnO} onClick={() => setModal(null)}>✕</button>
+            </div>
+
+            {emp.status === "ativo" && (
+              <button style={{ ...btn(C.blue), width:"100%", marginBottom:16, fontSize:12 }}
+                onClick={() => { setFAmort({ valor:"", data:today() }); setModal("amortizacao"); }}>
+                💧 AMORTIZAR DÍVIDA
+              </button>
+            )}
+
+            {(emp.amortizacoes||[]).length > 0 && (
+              <div style={{ marginBottom:14 }}>
+                <div style={{ color:C.blue, fontSize:10, letterSpacing:2, marginBottom:8 }}>AMORTIZAÇÕES</div>
+                {emp.amortizacoes.map((a,i) => (
+                  <div key={i} style={cardS({ background:C.card2, padding:"10px 14px", borderColor:C.blue+"33" })}>
+                    <div style={{ display:"flex", justifyContent:"space-between", fontSize:13 }}>
+                      <span style={{ color:C.blue, fontWeight:700 }}>- {fmt(a.valor)}</span>
+                      <span style={{ color:C.muted, fontSize:11 }}>{fmtDate(a.data)}</span>
+                    </div>
+                    <div style={{ color:C.muted, fontSize:11, marginTop:2 }}>{fmt(a.saldoAntes)} → {fmt(a.saldoDepois)}</div>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <div style={{ color:C.muted, fontSize:10, letterSpacing:2, marginBottom:8 }}>CICLOS DE PAGAMENTO</div>
+            {(emp.ciclos||[]).map(p => {
+              const atraso = diasEntre(p.vencimento, today());
+              return (
+                <div key={p.id} style={cardS({ borderColor: p.status==="pago" ? C.green+"44" : p.status==="juros" ? C.gold+"33" : atraso>0&&p.status==="pendente" ? C.red+"44" : C.border })}>
+                  <div style={{ display:"flex", justifyContent:"space-between", marginBottom:8 }}>
+                    <span style={{ color:C.muted, fontSize:12 }}>Ciclo {p.id} · {fmtDate(p.vencimento)}</span>
+                    <span style={tag(p.status==="pago" ? C.green : p.status==="juros" ? C.gold : atraso>0&&p.status==="pendente" ? C.red : C.muted)}>
+                      {p.status==="pago" ? "✓ PAGO" : p.status==="juros" ? "$ JUROS" : atraso>0 ? `${atraso}d ATRASO` : "PENDENTE"}
+                    </span>
+                  </div>
+                  <div style={{ display:"flex", gap:14, fontSize:12, flexWrap:"wrap", marginBottom: p.status==="pendente" ? 10 : 0 }}>
+                    <div><span style={{ color:C.muted }}>Saldo </span><span style={{ color:C.goldL }}>{fmt(p.saldo)}</span></div>
+                    <div><span style={{ color:C.muted }}>Juros </span><span style={{ color:C.red }}>{fmt(p.juros)}</span></div>
+                    <div><span style={{ color:C.muted }}>Total </span><span style={{ color:C.gold, fontWeight:700 }}>{fmt(p.total)}</span></div>
+                  </div>
+                  {p.status === "pendente" && (
+                    <div style={{ display:"flex", gap:8 }}>
+                      <button style={{ ...btn(C.green), flex:1, fontSize:11, padding:"9px 0" }} onClick={() => pagarCiclo(emp.id, p.id, "pago")}>✓ PAGO TOTAL</button>
+                      <button style={{ ...btn(C.gold), flex:1, fontSize:11, padding:"9px 0" }} onClick={() => pagarCiclo(emp.id, p.id, "juros")}>$ SÓ JUROS</button>
+                      {cli?.telefone && (
+                        <button style={{ ...btn("#25D366"), padding:"9px 12px" }} onClick={() => whatsApp(cli.telefone, cli.nome, p.vencimento, p.total)}>📱</button>
+                      )}
+                    </div>
+                  )}
+                  {p.status !== "pendente" && (
+                    <div style={{ fontSize:11, color:C.muted, marginTop:4 }}>
+                      {p.status==="pago" ? "Pago total" : "Juros pagos"} em {fmtDate(p.dataPagamento)} · {fmt(p.valorPago)}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        );
+      };
+
+      // ─── Modal Amortização ────────────────────────────────────────────────────────
+      const AmortizacaoModal = () => {
+        const emp = emprestimos.find(e => e.id === selecionadoId);
+        if (!emp) return null;
+        const periodo   = emp.periodo || "mensal";
+        const valAmort  = parseFloat(fAmort.valor) || 0;
+        const novoSaldo = Math.max(0, emp.saldoActual - valAmort);
+        const novosJuros= calcJurosPeriodo(novoSaldo, emp.taxa, periodo);
+        return (
+          <div style={{ background:C.card, borderRadius:"20px 20px 0 0", padding:24, width:"100%", borderTop:`2px solid ${C.blue}` }}>
+            <div style={{ color:C.blue, fontWeight:700, fontSize:16, marginBottom:6, letterSpacing:2 }}>💧 AMORTIZAR DÍVIDA</div>
+            <div style={{ color:C.muted, fontSize:12, marginBottom:20 }}>
+              Saldo actual: <span style={{ color:C.goldL, fontWeight:700 }}>{fmt(emp.saldoActual)}</span>
+            </div>
+            <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:14 }}>
+              <div>
+                <label style={lbl}>VALOR A AMORTIZAR *</label>
+                <input style={inp} type="number" placeholder="0.00" value={fAmort.valor}
+                  onChange={e => setFAmort(v=>({...v, valor:e.target.value}))} />
+              </div>
+              <div>
+                <label style={lbl}>DATA DA AMORTIZAÇÃO</label>
+                <input style={inp} type="date" value={fAmort.data}
+                  onChange={e => setFAmort(v=>({...v, data:e.target.value}))} />
+              </div>
+            </div>
+            {valAmort > 0 && (
+              <div style={cardS({ background:C.card2, borderColor:C.blue+"33", marginBottom:16 })}>
+                <div style={{ color:C.muted, fontSize:10, letterSpacing:2, marginBottom:8 }}>SIMULAÇÃO</div>
+                <div style={{ display:"flex", gap:16, fontSize:13, flexWrap:"wrap" }}>
+                  <div><div style={{ color:C.muted, fontSize:9 }}>NOVO SALDO</div><div style={{ color: novoSaldo===0 ? C.green : C.goldL, fontWeight:700 }}>{fmt(novoSaldo)}</div></div>
+                  <div><div style={{ color:C.muted, fontSize:9 }}>PRÓXIMOS JUROS</div><div style={{ color:C.red, fontWeight:700 }}>{fmt(novosJuros)}</div></div>
+                  <div><div style={{ color:C.muted, fontSize:9 }}>PRÓXIMO TOTAL</div><div style={{ color:C.gold, fontWeight:700 }}>{fmt(novoSaldo+novosJuros)}</div></div>
+                </div>
+                {novoSaldo === 0 && <div style={{ color:C.green, fontSize:12, marginTop:8, fontWeight:700 }}>✓ Dívida será totalmente quitada!</div>}
+              </div>
+            )}
+            <div style={{ display:"flex", gap:10 }}>
+              <button style={{ ...btnO, flex:1 }} onClick={() => setModal("detalhes")}>CANCELAR</button>
+              <button style={{ ...btn(C.blue), flex:2 }} onClick={() => fazerAmortizacao(emp.id)}>CONFIRMAR AMORTIZAÇÃO</button>
+            </div>
+          </div>
+        );
+      };
+
+      // ─── RENDER ───────────────────────────────────────────────────────────────────
+      return (
+        <div style={{ minHeight:"100vh", background:C.bg, color:C.text, fontFamily:"'Courier New',monospace", paddingBottom:76 }}>
+
+          {/* HEADER */}
+          <div style={{ background:C.card, borderBottom:`1px solid ${C.border}`, padding:"14px 18px", display:"flex", alignItems:"center", justifyContent:"space-between", position:"sticky", top:0, zIndex:100 }}>
+            <div>
+              <div style={{ color:C.gold, fontWeight:700, fontSize:19, letterSpacing:4 }}>💰 CAIXA FORTE</div>
+              <div style={{ color:C.muted, fontSize:9, letterSpacing:3 }}>GESTÃO · METICAIS · MZN</div>
+            </div>
+            <button style={btn()} onClick={() => setModal(aba==="clientes" ? "novoCliente" : "novoEmprestimo")}>+ NOVO</button>
+          </div>
+
+          <div style={{ padding:"14px 14px 0" }}>
+
+            {/* ── DASHBOARD ── */}
+            {aba === "dashboard" && (
+              <React.Fragment>
+                <div onClick={() => { setFCaixa(""); setModalCaixa(true); }}
+                  style={{ background:C.card, border:`2px solid ${C.green}33`, borderRadius:14, padding:"16px 18px", marginBottom:12, cursor:"pointer", display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                  <div>
+                    <div style={{ color:C.muted, fontSize:9, letterSpacing:2, marginBottom:4 }}>💵 CAIXA DISPONÍVEL</div>
+                    <div style={{ color:C.green, fontWeight:700, fontSize:26 }}>{fmt(caixa)}</div>
+                    <div style={{ color:C.muted, fontSize:10, marginTop:2 }}>Toque para ajustar</div>
+                  </div>
+                  <div style={{ textAlign:"right" }}>
+                    <div style={{ color:C.muted, fontSize:9, letterSpacing:1, marginBottom:4 }}>EMPRESTADO</div>
+                    <div style={{ color:C.red, fontWeight:700, fontSize:16 }}>{fmt(totalEmprestado)}</div>
+                  </div>
+                </div>
+
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:16 }}>
+                  {[
+                    { l:"A RECEBER (JUROS+K)", v:fmt(totalReceber),              c:C.gold },
+                    { l:"JÁ RECEBIDO",         v:fmt(totalRecebido),             c:C.green },
+                    { l:"EMPRÉSTIMOS ACTIVOS", v:empsAtivos,                     c:C.goldL },
+                    { l:"CAPITAL TOTAL",        v:fmt(caixa + totalEmprestado),  c:C.blue },
+                  ].map((s,i) => (
+                    <div key={i} style={{ background:C.card, border:`1px solid ${C.border}`, borderRadius:12, padding:"14px 16px" }}>
+                      <div style={{ color:C.muted, fontSize:9, letterSpacing:2, marginBottom:6 }}>{s.l}</div>
+                      <div style={{ color:s.c, fontWeight:700, fontSize:18 }}>{s.v}</div>
+                    </div>
+                  ))}
+                </div>
+
+                {alertas.length > 0 && (
+                  <div style={cardS({ borderColor:C.red+"55", marginBottom:16 })}>
+                    <div style={{ color:C.red, fontWeight:700, fontSize:12, letterSpacing:2, marginBottom:12 }}>⚠ ALERTAS ({alertas.length})</div>
+                    {alertas.map((a, i) => (
+                      <div key={i} style={{ borderTop: i ? `1px solid ${C.border}` : "none", paddingTop: i ? 10 : 0, marginTop: i ? 10 : 0, display:"flex", justifyContent:"space-between", alignItems:"center" }}>
+                        <div>
+                          <div style={{ fontWeight:700 }}>{a.cli?.nome || "?"}</div>
+                          <div style={{ color:C.muted, fontSize:12 }}>
+                            {a.atraso > 0 ? `⚠ ${a.atraso} dia(s) em atraso` : `Vence em ${a.diasAteVenc} dia(s)`} · {fmtDate(a.p.vencimento)}
+                          </div>
+                          <div style={{ color:C.gold, fontWeight:700, fontSize:14 }}>{fmt(a.p.total)}</div>
+                        </div>
+                        {a.cli?.telefone && (
+                          <button style={{ ...btn("#25D366"), fontSize:12, padding:"9px 12px" }}
+                            onClick={() => whatsApp(a.cli.telefone, a.cli.nome, a.p.vencimento, a.p.total)}>📱 WA</button>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                <div style={{ color:C.muted, fontSize:10, letterSpacing:2, marginBottom:8 }}>EMPRÉSTIMOS RECENTES</div>
+                {emprestimos.filter(e=>e.status==="ativo").slice(-4).reverse().map(e => <EmpCard key={e.id} emp={e} />)}
+                {empsAtivos === 0 && <div style={{ textAlign:"center", color:C.muted, padding:40, fontSize:13 }}>Sem empréstimos activos.<br/>Toque em + NOVO para começar.</div>}
+              </React.Fragment>
+            )}
+
+            {/* ── EMPRÉSTIMOS ── */}
+            {aba === "emprestimos" && (
+              <React.Fragment>
+                <div style={{ color:C.muted, fontSize:10, letterSpacing:2, marginBottom:8 }}>TODOS OS EMPRÉSTIMOS ({emprestimos.length})</div>
+                {emprestimos.length === 0 && <div style={{ textAlign:"center", color:C.muted, padding:40 }}>Sem empréstimos.</div>}
+                {[...emprestimos].reverse().map(e => <EmpCard key={e.id} emp={e} />)}
+              </React.Fragment>
+            )}
+
+            {/* ── CLIENTES ── */}
+            {aba === "clientes" && (
+              <React.Fragment>
+                <div style={{ color:C.muted, fontSize:10, letterSpacing:2, marginBottom:8 }}>CLIENTES ({clientes.length})</div>
+                {clientes.length === 0 && <div style={{ textAlign:"center", color:C.muted, padding:40 }}>Sem clientes. Toque em + NOVO.</div>}
+                {clientes.map(c => {
+                  const emps = emprestimos.filter(e=>e.clienteId===c.id);
+                  const saldoTotal = emps.filter(e=>e.status==="ativo").reduce((s,e)=>s+e.saldoActual,0);
+                  return (
+                    <div key={c.id} style={cardS()}>
+                      <div style={{ display:"flex", justifyContent:"space-between", alignItems:"center", marginBottom: c.telefone ? 10 : 0 }}>
+                        <div>
+                          <div style={{ fontWeight:700, fontSize:15 }}>{c.nome}</div>
+                          <div style={{ color:C.muted, fontSize:12, marginTop:2 }}>+258 {c.telefone}{c.doc ? ` · ${c.doc}` : ""}</div>
+                        </div>
+                        <div style={{ textAlign:"right" }}>
+                          {saldoTotal > 0 && <div style={{ color:C.red, fontWeight:700 }}>Deve {fmt(saldoTotal)}</div>}
+                          <div style={{ color:C.muted, fontSize:11 }}>{emps.length} emp.</div>
+                        </div>
+                      </div>
+                      {c.telefone && (
+                        <button style={{ ...btn("#25D366"), width:"100%", fontSize:12 }}
+                          onClick={() => window.open(`https://wa.me/258${c.telefone.replace(/\D/g,"")}`, "_blank")}>
+                          📱 Contactar no WhatsApp
+                        </button>
+                      )}
+                    </div>
+                  );
+                })}
+              </React.Fragment>
+            )}
+          </div>
+
+          {/* NAV */}
+          <nav style={{ position:"fixed", bottom:0, left:0, right:0, background:C.card, borderTop:`1px solid ${C.border}`, display:"flex", zIndex:100 }}>
+            {[{id:"dashboard",icon:"📊",l:"PAINEL"},{id:"emprestimos",icon:"💸",l:"EMPRÉSTIMOS"},{id:"clientes",icon:"👥",l:"CLIENTES"}].map(n => (
+              <button key={n.id} onClick={() => setAba(n.id)}
+                style={{ flex:1, padding:"12px 0", background:"none", border:"none", color: aba===n.id ? C.gold : C.muted, fontSize:9, letterSpacing:1, cursor:"pointer", display:"flex", flexDirection:"column", alignItems:"center", gap:4, fontFamily:"'Courier New',monospace", position:"relative" }}>
+                <span style={{ fontSize:22 }}>{n.icon}</span>
+                {n.id==="dashboard" && alertas.length>0 && (
+                  <div style={{ position:"absolute", top:8, right:"calc(50% - 20px)", background:C.red, color:"#fff", borderRadius:"50%", width:16, height:16, fontSize:10, display:"flex", alignItems:"center", justifyContent:"center" }}>{alertas.length}</div>
+                )}
+                {n.l}
+              </button>
+            ))}
+          </nav>
+
+          {/* MODAL: NOVO CLIENTE */}
+          {modal === "novoCliente" && (
+            <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.85)", zIndex:200, display:"flex", alignItems:"flex-end" }} onClick={e=>e.target===e.currentTarget&&setModal(null)}>
+              <div style={{ background:C.card, borderRadius:"20px 20px 0 0", padding:24, width:"100%", borderTop:`2px solid ${C.gold}` }}>
+                <div style={{ color:C.gold, fontWeight:700, fontSize:16, marginBottom:20, letterSpacing:2 }}>NOVO CLIENTE</div>
+                {[{l:"NOME *",k:"nome",p:"Nome completo"},{l:"TELEFONE (sem +258)",k:"telefone",p:"Ex: 84 123 4567"},{l:"BI / DOC",k:"doc",p:"Opcional"}].map(f => (
+                  <div key={f.k} style={{ marginBottom:14 }}>
+                    <label style={lbl}>{f.l}</label>
+                    <input style={inp} placeholder={f.p} value={fCliente[f.k]} onChange={e=>setFCliente(v=>({...v,[f.k]:e.target.value}))} />
+                  </div>
+                ))}
+                <div style={{ display:"flex", gap:10, marginTop:8 }}>
+                  <button style={{ ...btnO, flex:1 }} onClick={()=>setModal(null)}>CANCELAR</button>
+                  <button style={{ ...btn(), flex:2 }} onClick={salvarCliente}>GUARDAR CLIENTE</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* MODAL: NOVO EMPRÉSTIMO */}
+          {modal === "novoEmprestimo" && (
+            <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.85)", zIndex:200, display:"flex", alignItems:"flex-end" }} onClick={e=>e.target===e.currentTarget&&setModal(null)}>
+              <div style={{ background:C.card, borderRadius:"20px 20px 0 0", padding:24, width:"100%", maxHeight:"90vh", overflowY:"auto", borderTop:`2px solid ${C.gold}` }}>
+                <div style={{ color:C.gold, fontWeight:700, fontSize:16, marginBottom:20, letterSpacing:2 }}>NOVO EMPRÉSTIMO</div>
+                <div style={{ marginBottom:14 }}>
+                  <label style={lbl}>CLIENTE *</label>
+                  <select style={inp} value={fEmp.clienteId} onChange={e=>setFEmp(v=>({...v,clienteId:e.target.value}))}>
+                    <option value="">Selecionar cliente...</option>
+                    {clientes.map(c=><option key={c.id} value={c.id}>{c.nome}</option>)}
+                  </select>
+                </div>
+                <div style={{ marginBottom:14 }}>
+                  <label style={lbl}>PERÍODO DO EMPRÉSTIMO</label>
+                  <div style={{ display:"flex", gap:8 }}>
+                    {["diario","semanal","mensal"].map(p => (
+                      <button key={p} onClick={()=>setFEmp(v=>({...v,periodo:p}))}
+                        style={{ flex:1, padding:"10px 0", borderRadius:8, border:`1px solid ${fEmp.periodo===p ? C.gold : C.border}`, background: fEmp.periodo===p ? C.gold+"22" : "transparent", color: fEmp.periodo===p ? C.gold : C.muted, fontFamily:"'Courier New',monospace", fontSize:11, fontWeight:700, cursor:"pointer", letterSpacing:1 }}>
+                        {(PERIODO_LABEL[p]||p).toUpperCase()}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:14 }}>
+                  <div><label style={lbl}>VALOR (MZN) *</label><input style={inp} type="number" placeholder="0.00" value={fEmp.valor} onChange={e=>setFEmp(v=>({...v,valor:e.target.value}))} /></div>
+                  <div>
+                    <label style={lbl}>TAXA {(PERIODO_LABEL[fEmp.periodo||"mensal"]||"MENSAL").toUpperCase()} (%)*</label>
+                    <input style={inp} type="number" placeholder="10" value={fEmp.taxa} onChange={e=>setFEmp(v=>({...v,taxa:e.target.value}))} />
+                  </div>
+                </div>
+                <div style={{ display:"grid", gridTemplateColumns:"1fr 1fr", gap:10, marginBottom:14 }}>
+                  <div><label style={lbl}>Nº CICLOS</label><input style={inp} type="number" min="1" value={fEmp.numCiclos} onChange={e=>setFEmp(v=>({...v,numCiclos:e.target.value}))} /></div>
+                  <div><label style={lbl}>DATA INÍCIO</label><input style={inp} type="date" value={fEmp.dataInicio} onChange={e=>setFEmp(v=>({...v,dataInicio:e.target.value}))} /></div>
+                </div>
+                {fEmp.valor && fEmp.taxa && fEmp.numCiclos && (() => {
+                  const principal = parseFloat(fEmp.valor)||0;
+                  const juros     = calcJurosPeriodo(principal, parseFloat(fEmp.taxa)||0, fEmp.periodo);
+                  const total     = (principal + juros) * (parseInt(fEmp.numCiclos)||1);
+                  return (
+                    <div style={cardS({ background:C.card2, borderColor:C.gold+"33", marginBottom:14 })}>
+                      <div style={{ color:C.muted, fontSize:10, letterSpacing:2, marginBottom:8 }}>SIMULAÇÃO</div>
+                      <div style={{ display:"flex", gap:12, fontSize:13, flexWrap:"wrap" }}>
+                        <div><div style={{ color:C.muted, fontSize:9 }}>JUROS/{(PERIODO_LABEL[fEmp.periodo||"mensal"]||"MENSAL").toUpperCase()}</div><div style={{ color:C.red, fontWeight:700 }}>{fmt(juros)}</div></div>
+                        <div><div style={{ color:C.muted, fontSize:9 }}>JUROS TOTAIS</div><div style={{ color:C.red, fontWeight:700 }}>{fmt(juros*(parseInt(fEmp.numCiclos)||1))}</div></div>
+                        <div><div style={{ color:C.muted, fontSize:9 }}>TOTAL GERAL</div><div style={{ color:C.green, fontWeight:700 }}>{fmt(total)}</div></div>
+                      </div>
+                    </div>
+                  );
+                })()}
+                <div style={{ marginBottom:16 }}>
+                  <label style={lbl}>OBSERVAÇÕES</label>
+                  <input style={inp} placeholder="Opcional..." value={fEmp.obs} onChange={e=>setFEmp(v=>({...v,obs:e.target.value}))} />
+                </div>
+                <div style={{ display:"flex", gap:10 }}>
+                  <button style={{ ...btnO, flex:1 }} onClick={()=>setModal(null)}>CANCELAR</button>
+                  <button style={{ ...btn(), flex:2 }} onClick={salvarEmprestimo}>REGISTAR EMPRÉSTIMO</button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* MODAL: DETALHES */}
+          {modal === "detalhes" && (
+            <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.85)", zIndex:200, display:"flex", alignItems:"flex-end" }} onClick={e=>e.target===e.currentTarget&&setModal(null)}>
+              <DetalhesModal />
+            </div>
+          )}
+
+          {/* MODAL: AMORTIZAÇÃO */}
+          {modal === "amortizacao" && (
+            <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.85)", zIndex:200, display:"flex", alignItems:"flex-end" }} onClick={e=>e.target===e.currentTarget&&setModal("detalhes")}>
+              <AmortizacaoModal />
+            </div>
+          )}
+
+          {/* MODAL: AJUSTAR CAIXA */}
+          {modalCaixa && (
+            <div style={{ position:"fixed", inset:0, background:"rgba(0,0,0,0.85)", zIndex:200, display:"flex", alignItems:"flex-end" }} onClick={e=>e.target===e.currentTarget&&setModalCaixa(false)}>
+              <div style={{ background:C.card, borderRadius:"20px 20px 0 0", padding:24, width:"100%", borderTop:`2px solid ${C.green}` }}>
+                <div style={{ color:C.green, fontWeight:700, fontSize:16, marginBottom:6, letterSpacing:2 }}>💵 AJUSTAR CAIXA</div>
+                <div style={{ color:C.muted, fontSize:12, marginBottom:20 }}>
+                  Caixa actual: <span style={{ color:C.green, fontWeight:700 }}>{fmt(caixa)}</span>
+                </div>
+                <div style={{ marginBottom:16 }}>
+                  <label style={lbl}>NOVO VALOR DA CAIXA (MZN)</label>
+                  <input style={{ ...inp, fontSize:18 }} type="number" placeholder="0.00" value={fCaixa} onChange={e=>setFCaixa(e.target.value)} />
+                </div>
+                <div style={{ color:C.muted, fontSize:11, marginBottom:16 }}>
+                  ⚠ Define directamente o saldo em caixa. Os empréstimos activos não são afectados.
+                </div>
+                <div style={{ display:"flex", gap:10 }}>
+                  <button style={{ ...btnO, flex:1 }} onClick={()=>setModalCaixa(false)}>CANCELAR</button>
+                  <button style={{ ...btn(C.green), flex:2 }} onClick={()=>{ const v=parseFloat(fCaixa); if(!isNaN(v)&&v>=0){ setCaixa(v); setModalCaixa(false); } }}>
+                    GUARDAR CAIXA
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          <style>{`
+            input[type=date]::-webkit-calendar-picker-indicator { filter: invert(0.5); }
+            select option { background: #0d0d18; }
+            ::-webkit-scrollbar { width: 4px; }
+            ::-webkit-scrollbar-track { background: #07070e; }
+            ::-webkit-scrollbar-thumb { background: #1a1a2e; border-radius: 2px; }
+          `}</style>
+        </div>
+      );
+    }
+
+    ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+
+    // ─── SERVICE WORKER ────────────────────────────────────────────────────────
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", () => {
+        navigator.serviceWorker.register("./service-worker.js")
+          .then(reg => console.log("✅ SW registado:", reg.scope))
+          .catch(err => console.warn("SW falhou:", err));
+      });
+    }
+  </script>
+</body>
+</html>
